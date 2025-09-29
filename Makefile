@@ -85,6 +85,7 @@ doxy:
 	$(RM) $(DOC_DIR)/*
 	doxygen -g
 doc:
+    $(RM) $(DOC_DIR)/*
 	doxygen
 
 .PHONY: all clean
