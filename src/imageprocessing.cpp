@@ -65,7 +65,7 @@ void downloadImage(const std::string& url, const std::string& filename) {
     CURLcode res = curl_easy_perform(curl);
     fclose(fp);
     curl_easy_cleanup(curl);
-    if (res != CURLE_OK) exit(1);
+    if (res != CURLE_OK) return;
 }
 
 void toGrayscale(const std::string& input, const std::string& output) {
@@ -152,14 +152,11 @@ std::vector<std::string> generateImageUrls(const std::string& apiKey, int numima
         std::ostringstream extractionPrompt;
         extractionPrompt
             << "Extract all URLs from the following contents into a plain text "
-               "list. "
-            << "Each URL must be on a new line. These are the contents: "
+               "list. Each URL must be on a new line. These are the contents: "
             << genText;
         std::string extractionResponse =
             postToGemini(apiKey, extractionPrompt.str());
         std::string urlsText = extractTextFromGemini(extractionResponse);
-
-        std::cout << urlsText << std::endl;
 
         // Split lines and validate URLs
         std::vector<std::string> candidate_urls;
@@ -184,7 +181,7 @@ std::vector<std::string> generateImageUrls(const std::string& apiKey, int numima
 }
 
 int main(int argc, char* argv[]) {
-    std::ifstream keyFile("googleai.key");
+    std::ifstream keyFile(APIKEY_FILE);
     if (!keyFile) {
         std::cerr << "API key file is missing" << std::endl;
         return 1;
@@ -204,7 +201,6 @@ int main(int argc, char* argv[]) {
         for (size_t i = 0; i < imageUrls.size(); i++) {
             std::string filename = IMAGES_DIR + std::to_string(i + 1) + ".jpg";
             std::string grayFile = GSIMAGES_DIR + std::to_string(i + 1) + ".jpg";
-
             downloadImage(imageUrls[i], filename);
             toGrayscale(filename, grayFile);
         }
