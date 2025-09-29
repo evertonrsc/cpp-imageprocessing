@@ -1,3 +1,12 @@
+/**
+ * @file	imageprocessing.cpp
+ * @brief	An image processing program that applies grayscale
+ *          transformation to batches of images
+ * @author	Everton Cavalcante (everton.cavalcante@ufrn.br)
+ * @since	September 24, 2025
+ * @date	September 28, 2025
+ */
+
 #include <curl/curl.h>
 #include <sys/stat.h>
 
@@ -13,17 +22,41 @@
 #include "json.hpp"
 using json = nlohmann::json;
 
+/** @brief Generative AI model */
+#define GENAI_MODEL "gemini-2.5-flash-lite"
+
+/** @brief Directory to store downloaded images */
 # define IMAGES_DIR "images/"
+
+/** @brief Directory to store processed images */
 # define GSIMAGES_DIR "gs-images/"
+
+/** @brief API key file for Google Gemini */
 # define APIKEY_FILE "googleai.key"
 
-// curl write callback
-size_t writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-    ((std::string*)userp)->append((char*)contents, size * nmemb);
-    return size * nmemb;
+/**
+ * @brief A callback for libcurl.
+ * @details When libcurl is used to to perform an HTTP request, it needs to
+ *          know how to handle the incoming data (the response body).
+ *          This function is registered with CURLOPT_WRITEFUNCTION, and each
+ *          time libcurl receives a block of data, it calls this function.
+ *
+ * @param contents Pointer to the block of data received from the HTTP response
+ * @param size The size (in bytes) of each data element
+ * @param num_data The number of data elements
+ * @param userp Pointer to a string that will hold the response
+ * @return Number of bytes handled (size * num_data)
+ */
+size_t writeCallback(void* contents, size_t size, size_t num_data, void* userp) {
+    ((std::string*)userp)->append((char*)contents, size * num_data);
+    return size * num_data;
 }
 
-// Ensure directory exists
+/**
+ * @brief Ensure that a directory exists, otherwise it creates the directory
+ * 
+ * @param dir Directory name
+ */
 void makeDir(const std::string& dir) {
     struct stat st;
     if (stat(dir.c_str(), &st) == -1) {
@@ -31,6 +64,12 @@ void makeDir(const std::string& dir) {
     }
 }
 
+/**
+ * @brief Check if a URL is accessible by making an HTTP request to it
+ *
+ * @param url URL to check
+ * @return true if the request is successful, false otherwise
+ */
 bool isAccessible(const std::string& url) {
     CURL* curl = curl_easy_init();
     if (!curl) return false;
@@ -50,6 +89,12 @@ bool isAccessible(const std::string& url) {
     return (res == CURLE_OK && response_code == 200);
 }
 
+/**
+ * @brief Downloads an image from its URL
+ *
+ * @param url URL to the image
+ * @param filename Name of the file for the downloaded image
+ */
 void downloadImage(const std::string& url, const std::string& filename) {
     CURL* curl = curl_easy_init();
     if (!curl) exit(1);
@@ -68,26 +113,39 @@ void downloadImage(const std::string& url, const std::string& filename) {
     if (res != CURLE_OK) return;
 }
 
-void toGrayscale(const std::string& input, const std::string& output) {
-    cv::Mat image = cv::imread(input);
+/**
+ * @brief Applies grayscale transformation to an image using facilities from
+ * OpenCV
+ *
+ * @param input_file Image file to process
+ * @param output_file Resulting processed image file
+ */
+void toGrayscale(const std::string& input_file, const std::string& output_file) {
+    cv::Mat image = cv::imread(input_file);
     if (image.empty()) {
-        std::cerr << "Error: unable to read " << input << std::endl;
+        std::cerr << "Error: unable to read " << input_file << " file" << std::endl;
         return;
     }
     cv::Mat gray;
     cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-    cv::imwrite(output, gray);
+    cv::imwrite(output_file, gray);
 }
 
-// POST to Gemini API
+/**
+ * @brief Make an HTTP POST request to the Google Gemini API
+ * 
+ * @param apiKey API key to interact with the API
+ * @param prompt Prompt to be executed on Google Gemini
+ * @return Output provided by Google Gemini 
+ */
 std::string postToGemini(const std::string& apiKey, const std::string& prompt) {
     CURL* curl = curl_easy_init();
     if (!curl) return "";
 
     std::string readBuffer;
     std::string url =
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.5-flash-lite:generateContent?key=" +
+        "https://generativelanguage.googleapis.com/v1beta/models/" +
+        std::string(GENAI_MODEL) + ":generateContent?key=" +
         apiKey;
 
     // Google Gemini body request in JSON
@@ -109,15 +167,19 @@ std::string postToGemini(const std::string& apiKey, const std::string& prompt) {
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        std::cerr << "Error in request: " << curl_easy_strerror(res)
-                  << std::endl;
+        std::cerr << "Error in request: " << curl_easy_strerror(res) << std::endl;
         return "";
     }
 
     return readBuffer;
 }
 
-// Extract text from Google Gemini JSON response
+/**
+ * @brief Extract text from Google Gemini response
+ * 
+ * @param response Response in JSON format
+ * @return Extracted text
+ */
 std::string extractTextFromGemini(const std::string& response) {
     try {
         json j = json::parse(response);
@@ -132,10 +194,23 @@ std::string extractTextFromGemini(const std::string& response) {
 }
 
 // Generate image URLs (two-step: generate -> extract)
+/**
+ * @brief Generates a list of public domain image URL from public domain image
+ *        repositories on the Web
+ * @details Google Gemini is utilized to generate the list of image URLs in a
+ *          two-step process with two prompts. The first one generates URLs
+ *          directly pointing to a valid image file in either JPEG or PNG format. The
+ *          second one is used to extract only the list of URLs from the output of the
+ *          first prompt as there is no guarantee that the first prompt generates only the
+ *          list of image URLs
+ *
+ * @param apiKey API key to Google Gemini
+ * @param numimages Number of images to generate
+ * @return List of image URLs
+ */
 std::vector<std::string> generateImageUrls(const std::string& apiKey, int numimages) {
     std::vector<std::string> image_urls;
     while (image_urls.size() < (size_t)numimages) {
-        // Step 1: Generate image URLs
         std::ostringstream generationPrompt;
         generationPrompt << "Generate " << numimages
                          << " public domain image URLs (either JPEG or PNG format)" 
@@ -148,7 +223,6 @@ std::vector<std::string> generateImageUrls(const std::string& apiKey, int numima
             postToGemini(apiKey, generationPrompt.str());
         std::string genText = extractTextFromGemini(generationResponse);
 
-        // Step 2: Extract only URLs from the output of the previous prompt
         std::ostringstream extractionPrompt;
         extractionPrompt
             << "Extract all URLs from the following contents into a plain text "
@@ -180,6 +254,13 @@ std::vector<std::string> generateImageUrls(const std::string& apiKey, int numima
     return image_urls;
 }
 
+/**
+ * @brief Main function
+ * 
+ * @param argc Number of command-line arguments
+ * @param argv Command-line arguments
+ * @return Execution status
+ */
 int main(int argc, char* argv[]) {
     std::ifstream keyFile(APIKEY_FILE);
     if (!keyFile) {
@@ -193,11 +274,11 @@ int main(int argc, char* argv[]) {
     makeDir(IMAGES_DIR);
     makeDir(GSIMAGES_DIR);
 
-    // Generate URLs from Google Gemini
     if (argc == 2) {
         int numimages = atoi(argv[1]);
         std::vector<std::string> imageUrls = generateImageUrls(apiKey, numimages);
 
+        // For each image URL, downloads the image and converts to grayscale
         for (size_t i = 0; i < imageUrls.size(); i++) {
             std::string filename = IMAGES_DIR + std::to_string(i + 1) + ".jpg";
             std::string grayFile = GSIMAGES_DIR + std::to_string(i + 1) + ".jpg";
